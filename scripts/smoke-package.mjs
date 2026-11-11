@@ -4,6 +4,7 @@ import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs
 import { tmpdir } from 'node:os'
 import { join, delimiter } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { checkDocs } from './check-docs.mjs'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 const temporary = await mkdtemp(join(tmpdir(), 'evot-bridge-package-'))
@@ -23,7 +24,9 @@ try {
   const prefix = join(temporary, 'install')
   npmRun(['install', '--global', '--prefix', prefix, '--ignore-scripts', '--offline', '--no-audit', '--no-fund', archive])
   const modules = npmRun(['root', '--global', '--prefix', prefix]).trim()
-  const installed = join(modules, '@evotai', 'evot-bridge', 'bin', 'evot-bridge')
+  const installedRoot = join(modules, '@evotai', 'evot-bridge')
+  await checkDocs(installedRoot)
+  const installed = join(installedRoot, 'bin', 'evot-bridge')
   const bin = join(temporary, 'bin')
   await mkdir(bin)
   await symlink(process.execPath, join(bin, process.platform === 'win32' ? 'node.exe' : 'node'))
@@ -81,7 +84,7 @@ process.exit(result.status ?? 1);
   })
   assert.equal(acp.status, 29, acp.stderr || String(acp.error))
   assert.equal(acp.stdout, acpInput, 'installed ACP transport must remain byte-transparent')
-  console.log('Package smoke passed: single evot-bridge executable, offline install, terminal hooks, resume argv, exit status, release, ACP mode.')
+  console.log('Package smoke passed: single evot-bridge executable, packaged documentation links, offline install, terminal hooks, resume argv, exit status, release, ACP mode.')
 } finally {
   await rm(temporary, { recursive: true, force: true })
 }

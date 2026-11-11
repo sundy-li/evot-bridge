@@ -2,6 +2,8 @@
 
 ## 0.3.0 (unreleased)
 
+- Shorten README to installation and integration quick starts; move detailed setup, configuration/migration, protocol, and development reference into `docs/`.
+- Ship documentation with the package and validate local links/anchors in CI, source installations, and offline package installations.
 - Repair inherited `EVOT_SESSION_HOOK` values pointing to removed evot-herdr launchers in terminal wrapper mode; preserve existing legacy installations and unrelated custom hooks.
 - Rename the project/package to `evot-bridge` / `@evotai/evot-bridge` and install only `evot-bridge`. Migrate Herdr/hook executable paths and T3 settings (`evot-bridge` plus argument `acp`).
 - Prefer `EVOT_BRIDGE_*` settings while accepting legacy `EVOT_HERDR_*` aliases; retain the shared legacy sequence allocator to preserve stale-hook fencing during upgrades.

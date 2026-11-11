@@ -2,8 +2,9 @@ import assert from 'node:assert/strict'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { access, chmod, cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { checkDocs } from './check-docs.mjs'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 const temporary = await mkdtemp(join(tmpdir(), 'evot-bridge-source-'))
@@ -15,7 +16,8 @@ try {
   const source = join(temporary, 'source')
   await mkdir(source)
   // Deliberately include only source/build inputs, never dist or node_modules.
-  for (const path of ['package.json', 'README.md', 'CHANGELOG.md', 'tsconfig.json', 'tsconfig.build.json', 'src', 'bin']) {
+  for (const path of ['package.json', 'README.md', 'CHANGELOG.md', 'tsconfig.json', 'tsconfig.build.json', 'src', 'bin', 'docs', 'scripts/check-docs.mjs']) {
+    await mkdir(dirname(join(source, path)), { recursive: true })
     await cp(join(root, path), join(source, path), { recursive: true })
   }
   await assert.rejects(access(join(source, 'dist')))
@@ -37,6 +39,8 @@ try {
   })
   const modules = run(npm, ['root', '--global', '--prefix', prefix]).trim()
   const installed = join(modules, '@evotai', 'evot-bridge')
+  await checkDocs(installed)
+  run(npm, ['run', 'test:docs'], checkout)
   for (const path of ['dist/index.js', 'dist/app.js', 'dist/process.js', 'bin/evot-bridge']) {
     await access(join(installed, path))
   }
@@ -71,7 +75,7 @@ process.stdin.pipe(process.stdout);
   })
   assert.equal(result.status, 0, result.stderr || String(result.error))
   assert.equal(result.stdout.trim(), process.version)
-  console.log('Source smoke passed: clean Git clone/install/link, automatic prepare build, compiled App adapter, executable linked wrapper.')
+  console.log('Source smoke passed: clean Git clone/install/link, automatic prepare build, compiled App adapter, executable linked wrapper, documentation links.')
 } finally {
   await rm(temporary, { recursive: true, force: true })
 }
