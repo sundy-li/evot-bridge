@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict'
 import { execFileSync, spawnSync } from 'node:child_process'
-import { access, cp, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
+import { access, chmod, cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
-const temporary = await mkdtemp(join(tmpdir(), 'evot-herdr-source-'))
+const temporary = await mkdtemp(join(tmpdir(), 'evot-bridge-source-'))
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm'
 const run = (command, args, cwd = temporary) => execFileSync(command, args, {
   cwd, encoding: 'utf8', timeout: 120_000, maxBuffer: 5 * 1024 * 1024,
@@ -36,15 +36,33 @@ try {
     encoding: 'utf8', timeout: 120_000,
   })
   const modules = run(npm, ['root', '--global', '--prefix', prefix]).trim()
-  const installed = join(modules, '@evotai', 'evot-herdr')
-  for (const path of ['dist/index.js', 'dist/app.js', 'dist/process.js', 'bin/evot-herdr']) {
+  const installed = join(modules, '@evotai', 'evot-bridge')
+  for (const path of ['dist/index.js', 'dist/app.js', 'dist/process.js', 'bin/evot-bridge']) {
     await access(join(installed, path))
   }
   const manifest = JSON.parse(await readFile(join(installed, 'package.json'), 'utf8'))
   assert.equal(manifest.version, JSON.parse(await readFile(join(root, 'package.json'), 'utf8')).version)
+  assert.deepEqual(manifest.bin, { 'evot-bridge': './bin/evot-bridge' })
+  const linkedAcp = process.platform === 'win32' ? join(prefix, 'evot-bridge.cmd') : join(prefix, 'bin', 'evot-bridge')
+  await access(linkedAcp)
+  const fakeAcp = join(temporary, 'fake-evot.cjs')
+  await writeFile(fakeAcp, `#!${process.execPath}
+if (process.argv[2] !== 'acp') process.exit(99);
+process.stdin.pipe(process.stdout);
+`)
+  await chmod(fakeAcp, 0o755)
+  const input = '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":2}}\n'
+  // Exercise the globally linked entry itself, not just the source/package
+  // path: a relocated launcher cannot resolve its relative dist import.
+  const linked = spawnSync(process.execPath, [linkedAcp, 'acp'], {
+    env: { ...process.env, EVOT_BIN_PATH: fakeAcp }, input,
+    encoding: 'utf8', timeout: 10_000,
+  })
+  assert.equal(linked.status, 0, linked.stderr || String(linked.error))
+  assert.equal(linked.stdout, input)
 
   // Node itself stands in for evot: --version must be forwarded unchanged.
-  const result = spawnSync(process.execPath, [join(installed, 'bin', 'evot-herdr'), '--version'], {
+  const result = spawnSync(process.execPath, [join(installed, 'bin', 'evot-bridge'), '--version'], {
     env: {
       ...process.env, EVOT_BIN_PATH: process.execPath, EVOT_SESSION_HOOK: '',
       HERDR_PANE_ID: 'source-install-test', HC_TERMINAL_ID: '',

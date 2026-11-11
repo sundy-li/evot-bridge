@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, describe, expect, test } from 'vitest'
 import {
-  EvotHerdrAdapter,
+  EvotBridgeAdapter,
   parseSessionHookEvent,
   readBoundedLines,
   runAdapter,
@@ -15,12 +15,12 @@ import {
   type HerdrRunner,
 } from '../src/index.js'
 
-const sequenceDirectory = await mkdtemp(join(tmpdir(), 'evot-herdr-sequence-'))
-const previousSequenceStatePath = process.env.EVOT_HERDR_SEQUENCE_STATE_PATH
-process.env.EVOT_HERDR_SEQUENCE_STATE_PATH = join(sequenceDirectory, 'sequence')
+const sequenceDirectory = await mkdtemp(join(tmpdir(), 'evot-bridge-sequence-'))
+const previousSequenceStatePath = process.env.EVOT_BRIDGE_SEQUENCE_STATE_PATH
+process.env.EVOT_BRIDGE_SEQUENCE_STATE_PATH = join(sequenceDirectory, 'sequence')
 afterAll(async () => {
-  if (previousSequenceStatePath === undefined) delete process.env.EVOT_HERDR_SEQUENCE_STATE_PATH
-  else process.env.EVOT_HERDR_SEQUENCE_STATE_PATH = previousSequenceStatePath
+  if (previousSequenceStatePath === undefined) delete process.env.EVOT_BRIDGE_SEQUENCE_STATE_PATH
+  else process.env.EVOT_BRIDGE_SEQUENCE_STATE_PATH = previousSequenceStatePath
   await rm(sequenceDirectory, { recursive: true, force: true })
 })
 
@@ -58,10 +58,10 @@ function commandName(command: string[]): string | undefined {
   return command[2]
 }
 
-describe('EvotHerdrAdapter', () => {
+describe('EvotBridgeAdapter', () => {
   test('maps lifecycle events to ordered Herdr commands', async () => {
     const commands: string[][] = []
-    const adapter = new EvotHerdrAdapter({
+    const adapter = new EvotBridgeAdapter({
       env: { HERDR_PANE_ID: 'w1:p1', HERDR_BIN_PATH: '/bin/herdr' },
       run: successfulRecorder(commands),
     })
@@ -90,8 +90,8 @@ describe('EvotHerdrAdapter', () => {
   test('emits strictly increasing safe i64 sequence numbers', async () => {
     const commands: string[][] = []
     const run = successfulRecorder(commands)
-    const first = new EvotHerdrAdapter({ env: { HERDR_PANE_ID: 'w1:p1' }, run })
-    const second = new EvotHerdrAdapter({ env: { HERDR_PANE_ID: 'w1:p1' }, run })
+    const first = new EvotBridgeAdapter({ env: { HERDR_PANE_ID: 'w1:p1' }, run })
+    const second = new EvotBridgeAdapter({ env: { HERDR_PANE_ID: 'w1:p1' }, run })
 
     await first.handle({ version: 1, event: 'session_started', session_id: 'sid-1' })
     await first.handle({ version: 1, event: 'session_ended', session_id: 'sid-1' })
@@ -108,13 +108,13 @@ describe('EvotHerdrAdapter', () => {
   test('fences a late release from an older adapter generation', async () => {
     const olderCommands: string[][] = []
     const newerCommands: string[][] = []
-    const older = new EvotHerdrAdapter({
+    const older = new EvotBridgeAdapter({
       env: { HERDR_PANE_ID: 'w1:p1' },
       run: successfulRecorder(olderCommands),
     })
     await older.handle({ version: 1, event: 'session_started' })
 
-    const newer = new EvotHerdrAdapter({
+    const newer = new EvotBridgeAdapter({
       env: { HERDR_PANE_ID: 'w1:p1' },
       run: successfulRecorder(newerCommands),
     })
@@ -129,7 +129,7 @@ describe('EvotHerdrAdapter', () => {
 
   test('keeps Promise<void> runners backward compatible', async () => {
     const commands: string[][] = []
-    const adapter = new EvotHerdrAdapter({
+    const adapter = new EvotBridgeAdapter({
       env: { HERDR_PANE_ID: 'w1:p1' },
       run: async argv => {
         commands.push(argv)
@@ -145,7 +145,7 @@ describe('EvotHerdrAdapter', () => {
 
   test('deduplicates successful repeated states and changed messages', async () => {
     const commands: string[][] = []
-    const adapter = new EvotHerdrAdapter({
+    const adapter = new EvotBridgeAdapter({
       env: { HERDR_PANE_ID: 'w1:p1' },
       run: successfulRecorder(commands),
     })
@@ -164,7 +164,7 @@ describe('EvotHerdrAdapter', () => {
     const commands: string[][] = []
     let failedWorking = false
     let failedSession = false
-    const adapter = new EvotHerdrAdapter({
+    const adapter = new EvotBridgeAdapter({
       env: { HERDR_PANE_ID: 'w1:p1' },
       run: async argv => {
         commands.push(argv)
@@ -190,7 +190,7 @@ describe('EvotHerdrAdapter', () => {
 
   test('includes run failure messages on idle reports', async () => {
     const commands: string[][] = []
-    const adapter = new EvotHerdrAdapter({
+    const adapter = new EvotBridgeAdapter({
       env: { HERDR_PANE_ID: 'w1:p1' },
       run: successfulRecorder(commands),
     })
@@ -205,7 +205,7 @@ describe('EvotHerdrAdapter', () => {
 
   test('reports a newly assigned session identity even when state stays idle', async () => {
     const commands: string[][] = []
-    const adapter = new EvotHerdrAdapter({
+    const adapter = new EvotBridgeAdapter({
       env: { HERDR_PANE_ID: 'w1:p1' },
       run: successfulRecorder(commands),
     })
@@ -221,7 +221,7 @@ describe('EvotHerdrAdapter', () => {
 
   test('adopts the session identity from a mid-session event after a hook restart', async () => {
     const commands: string[][] = []
-    const adapter = new EvotHerdrAdapter({
+    const adapter = new EvotBridgeAdapter({
       env: { HERDR_PANE_ID: 'w1:p1' },
       run: successfulRecorder(commands),
     })
@@ -237,7 +237,7 @@ describe('EvotHerdrAdapter', () => {
 
   test('releases once on EOF when a session did not end explicitly', async () => {
     const commands: string[][] = []
-    const adapter = new EvotHerdrAdapter({
+    const adapter = new EvotBridgeAdapter({
       env: { HERDR_PANE_ID: 'w1:p1' },
       run: successfulRecorder(commands),
     })
@@ -252,7 +252,7 @@ describe('EvotHerdrAdapter', () => {
 
   test('does not release twice after session_ended and EOF', async () => {
     const commands: string[][] = []
-    const adapter = new EvotHerdrAdapter({
+    const adapter = new EvotBridgeAdapter({
       env: { HERDR_PANE_ID: 'w1:p1' },
       run: successfulRecorder(commands),
     })
@@ -268,7 +268,7 @@ describe('EvotHerdrAdapter', () => {
   test('retries a failed explicit release when EOF closes the hook', async () => {
     const commands: string[][] = []
     let releaseAttempts = 0
-    const adapter = new EvotHerdrAdapter({
+    const adapter = new EvotBridgeAdapter({
       env: { HERDR_PANE_ID: 'w1:p1' },
       run: async argv => {
         commands.push(argv)
@@ -288,7 +288,7 @@ describe('EvotHerdrAdapter', () => {
   test('continues after a custom runner throws', async () => {
     const commands: string[][] = []
     let calls = 0
-    const adapter = new EvotHerdrAdapter({
+    const adapter = new EvotBridgeAdapter({
       env: { HERDR_PANE_ID: 'w1:p1' },
       run: async argv => {
         calls++
@@ -307,7 +307,7 @@ describe('EvotHerdrAdapter', () => {
   })
 
   test('discovers the current Herdr pane when the wrapper environment omits it', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'evot-herdr-'))
+    const directory = await mkdtemp(join(tmpdir(), 'evot-bridge-'))
     const herdr = join(directory, 'herdr')
     const evot = join(directory, 'evot')
     const calls = join(directory, 'calls')
@@ -340,7 +340,7 @@ printf '%s\\n' '{"version":1,"event":"session_started","session_id":"sid-discove
       expect(output).toContain('pane report-agent w9:p9')
       expect(output).toContain('pane report-agent-session w9:p9')
       expect(output).toContain('pane release-agent w9:p9')
-      expect((await file(process.env.HOOK_CAPTURE!).text()).trim().endsWith('/bin/evot-herdr')).toBe(true)
+      expect((await file(process.env.HOOK_CAPTURE!).text()).trim().endsWith('/bin/evot-bridge')).toBe(true)
     } finally {
       process.env = previous
       await rm(directory, { recursive: true, force: true })
@@ -348,7 +348,7 @@ printf '%s\\n' '{"version":1,"event":"session_started","session_id":"sid-discove
   })
 
   test('discovers the current pane for a directly launched hook', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'evot-herdr-'))
+    const directory = await mkdtemp(join(tmpdir(), 'evot-bridge-'))
     const herdr = join(directory, 'herdr')
     await writeExecutable(herdr, `#!/bin/sh
 if [ "$1" = "pane" ] && [ "$2" = "current" ]; then
@@ -358,7 +358,7 @@ fi
 
     try {
       const commands: string[][] = []
-      const adapter = new EvotHerdrAdapter({
+      const adapter = new EvotBridgeAdapter({
         env: { HERDR_BIN_PATH: herdr },
         discoverPane: true,
         run: successfulRecorder(commands),
@@ -374,7 +374,7 @@ fi
   test('cleans up the pane discovery process tree after a timeout', async () => {
     if (process.platform === 'win32') return
 
-    const directory = await mkdtemp(join(tmpdir(), 'evot-herdr-'))
+    const directory = await mkdtemp(join(tmpdir(), 'evot-bridge-'))
     const herdr = join(directory, 'herdr')
     const pids = join(directory, 'pids')
     await writeExecutable(herdr, `#!/bin/sh
@@ -385,7 +385,7 @@ wait
 `)
 
     try {
-      const adapter = new EvotHerdrAdapter({
+      const adapter = new EvotBridgeAdapter({
         env: {
           HERDR_BIN_PATH: herdr,
           HERDR_COMMAND_TIMEOUT_MS: '500',
@@ -408,7 +408,7 @@ wait
 
   test('is inert without a pane id', async () => {
     let called = false
-    const adapter = new EvotHerdrAdapter({
+    const adapter = new EvotBridgeAdapter({
       env: {},
       run: async () => {
         called = true
@@ -423,16 +423,16 @@ wait
   })
 
   test('is inert when sequence state cannot be persisted', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'evot-herdr-'))
+    const directory = await mkdtemp(join(tmpdir(), 'evot-bridge-'))
     const parentFile = join(directory, 'not-a-directory')
     await writeFile(parentFile, 'file')
     let called = false
 
     try {
-      const adapter = new EvotHerdrAdapter({
+      const adapter = new EvotBridgeAdapter({
         env: {
           HERDR_PANE_ID: 'w1:p1',
-          EVOT_HERDR_SEQUENCE_STATE_PATH: join(parentFile, 'sequence'),
+          EVOT_BRIDGE_SEQUENCE_STATE_PATH: join(parentFile, 'sequence'),
         },
         run: async () => {
           called = true
@@ -450,16 +450,16 @@ wait
   })
 
   test('fails closed without overwriting malformed sequence state', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'evot-herdr-'))
+    const directory = await mkdtemp(join(tmpdir(), 'evot-bridge-'))
     const statePath = join(directory, 'sequence')
     await writeFile(statePath, 'not-a-generation\n')
     let called = false
 
     try {
-      const adapter = new EvotHerdrAdapter({
+      const adapter = new EvotBridgeAdapter({
         env: {
           HERDR_PANE_ID: 'w1:p1',
-          EVOT_HERDR_SEQUENCE_STATE_PATH: statePath,
+          EVOT_BRIDGE_SEQUENCE_STATE_PATH: statePath,
         },
         run: async () => {
           called = true
@@ -478,7 +478,7 @@ wait
   })
 
   test('recovers a stale sequence lock owned by a dead process', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'evot-herdr-'))
+    const directory = await mkdtemp(join(tmpdir(), 'evot-bridge-'))
     const statePath = join(directory, 'sequence')
     const lockPath = `${statePath}.lock`
     await writeFile(statePath, '1\n')
@@ -487,10 +487,10 @@ wait
     await utimes(lockPath, stale, stale)
 
     try {
-      const adapter = new EvotHerdrAdapter({
+      const adapter = new EvotBridgeAdapter({
         env: {
           HERDR_PANE_ID: 'w1:p1',
-          EVOT_HERDR_SEQUENCE_STATE_PATH: statePath,
+          EVOT_BRIDGE_SEQUENCE_STATE_PATH: statePath,
         },
         run: async () => true,
       })
@@ -555,7 +555,7 @@ describe('readBoundedLines', () => {
 
 describe('process execution', () => {
   test('propagates the evot exit code', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'evot-herdr-'))
+    const directory = await mkdtemp(join(tmpdir(), 'evot-bridge-'))
     const evot = join(directory, 'evot')
     const previousBin = process.env.EVOT_BIN_PATH
     const previousHook = process.env.EVOT_SESSION_HOOK
@@ -589,7 +589,7 @@ describe('process execution', () => {
   })
 
   test('times out a stuck Herdr process tree and continues reading', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'evot-herdr-'))
+    const directory = await mkdtemp(join(tmpdir(), 'evot-bridge-'))
     const herdr = join(directory, 'herdr')
     const capture = join(directory, 'calls')
     const pids = join(directory, 'pids')
@@ -602,7 +602,7 @@ wait
 `)
 
     const started = Date.now()
-    const adapter = new EvotHerdrAdapter({
+    const adapter = new EvotBridgeAdapter({
       env: {
         HERDR_PANE_ID: 'w1:p1',
         HERDR_BIN_PATH: herdr,
@@ -631,7 +631,7 @@ wait
   }, 5_000)
 
   test('wrapper mode does not depend on stdin being a TTY', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'evot-herdr-'))
+    const directory = await mkdtemp(join(tmpdir(), 'evot-bridge-'))
     const evot = join(directory, 'evot')
     const capture = join(directory, 'args')
     await writeExecutable(evot, `#!/bin/sh
@@ -641,7 +641,7 @@ exit 23
     try {
       const env: NodeJS.ProcessEnv = { ...process.env, EVOT_BIN_PATH: evot, CAPTURE: capture }
       delete env.EVOT_SESSION_HOOK
-      const child = spawnTest([join(testDirectory, '../bin/evot-herdr'), '--help'], {
+      const child = spawnTest([join(testDirectory, '../bin/evot-bridge'), '--help'], {
         env,
         stdin: 'pipe',
         stdout: 'ignore',
@@ -656,12 +656,12 @@ exit 23
   })
 
   test('selects hook mode only when self-referenced with piped stdin and no args', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'evot-herdr-'))
+    const directory = await mkdtemp(join(tmpdir(), 'evot-bridge-'))
     const evot = join(directory, 'evot')
     const herdr = join(directory, 'herdr')
     const evotCapture = join(directory, 'evot-args')
     const herdrCapture = join(directory, 'herdr-calls')
-    const wrapper = join(testDirectory, '../bin/evot-herdr')
+    const wrapper = join(testDirectory, '../bin/evot-bridge')
     await writeExecutable(evot, `#!/bin/sh
 printf '%s|%s\\n' "$*" "$EVOT_SESSION_HOOK" >> "$EVOT_CAPTURE"
 `)
@@ -694,7 +694,7 @@ printf '%s\\n' "$*" >> "$HERDR_CAPTURE"
       expect(await spawn([], {
         ...baseEnv,
         PATH: `${join(testDirectory, '../bin')}:${process.env.PATH ?? ''}`,
-        EVOT_SESSION_HOOK: 'evot-herdr',
+        EVOT_SESSION_HOOK: 'evot-bridge',
       })).toBe(0)
       expect(await file(herdrCapture).text()).toContain('pane report-agent w1:p1')
       expect(await file(evotCapture).exists()).toBe(false)
@@ -721,7 +721,7 @@ printf '%s\\n' "$*" >> "$HERDR_CAPTURE"
   })
 
   test('fences a late release across overlapping hook processes', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'evot-herdr-'))
+    const directory = await mkdtemp(join(tmpdir(), 'evot-bridge-'))
     const herdr = join(directory, 'herdr')
     const capture = join(directory, 'calls')
     const sequenceState = join(directory, 'sequence')
@@ -729,13 +729,13 @@ printf '%s\\n' "$*" >> "$HERDR_CAPTURE"
 printf '%s\\n' "$*" >> "$CAPTURE"
 `)
 
-    const hook = join(testDirectory, '../bin/evot-herdr')
+    const hook = join(testDirectory, '../bin/evot-bridge')
     const env = {
       ...process.env,
       EVOT_SESSION_HOOK: hook,
       HERDR_BIN_PATH: herdr,
       HERDR_PANE_ID: 'w1:p1',
-      EVOT_HERDR_SEQUENCE_STATE_PATH: sequenceState,
+      EVOT_BRIDGE_SEQUENCE_STATE_PATH: sequenceState,
       CAPTURE: capture,
     }
     const older = spawnTest([hook], {
@@ -781,7 +781,7 @@ printf '%s\\n' "$*" >> "$CAPTURE"
   })
 
   test('forwards wrapper SIGTERM to evot and preserves its signal exit status', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'evot-herdr-wrapper-signal-'))
+    const directory = await mkdtemp(join(tmpdir(), 'evot-bridge-wrapper-signal-'))
     const evot = join(directory, 'evot')
     const capture = join(directory, 'signal')
     await writeExecutable(evot, `#!/usr/bin/env node
@@ -790,7 +790,7 @@ process.on('SIGTERM', () => { fs.writeFileSync(process.env.CAPTURE, 'stopped'); 
 fs.writeFileSync(process.env.CAPTURE, 'ready');
 setInterval(() => {}, 1000);
 `)
-    const child = spawnTest([join(testDirectory, '../bin/evot-herdr'), '--resume', 'saved'], {
+    const child = spawnTest([join(testDirectory, '../bin/evot-bridge'), '--resume', 'saved'], {
       env: { ...process.env, EVOT_BIN_PATH: evot, HERDR_PANE_ID: 'w1:p1', CAPTURE: capture },
       stdin: 'pipe', stdout: 'ignore', stderr: 'ignore',
     })
@@ -807,13 +807,13 @@ setInterval(() => {}, 1000);
   })
 
   test('releases the agent before exiting on SIGTERM', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'evot-herdr-'))
+    const directory = await mkdtemp(join(tmpdir(), 'evot-bridge-'))
     const herdr = join(directory, 'herdr')
     const capture = join(directory, 'calls')
     await writeExecutable(herdr, `#!/bin/sh
 printf '%s\\n' "$*" >> "$CAPTURE"
 `)
-    const hook = join(testDirectory, '../bin/evot-herdr')
+    const hook = join(testDirectory, '../bin/evot-bridge')
     const child = spawnTest([hook], {
       env: {
         ...process.env,

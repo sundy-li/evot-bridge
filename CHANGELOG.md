@@ -2,6 +2,11 @@
 
 ## 0.3.0 (unreleased)
 
+- Rename the project/package to `evot-bridge` / `@evotai/evot-bridge` and install only `evot-bridge`. Migrate Herdr/hook executable paths and T3 settings (`evot-bridge` plus argument `acp`).
+- Prefer `EVOT_BRIDGE_*` settings while accepting legacy `EVOT_HERDR_*` aliases; retain the shared legacy sequence allocator to preserve stale-hook fencing during upgrades.
+- Use a single `evot-bridge` entry point: terminal integration by default and `evot-bridge acp` for T3 Code's Local ACP command, launching evot's native ACP server with byte-transparent stdio, inherited-hook isolation, and no pane discovery or OSC output.
+- Preserve native tool approval defaults, literal argv, session/model operations, child exit status, and client shutdown signals; document ACP v1 negotiation and unsupported MCP/image/audio features.
+- Verify ACP mode in transport regressions, offline package installation, and source install/link checks; install and package only the `evot-bridge` executable.
 - Support herdr-app / herdr-core (`hc`) terminals through automatic `HC_TERMINAL_ID` detection and OSC 7501 status reports, while retaining legacy CLI integration.
 - Relay detached session hooks through a private wrapper-owned terminal bridge; fence stale hooks, bound reports, encode messages safely, and clear status when evot exits.
 - Support directly configured POSIX hooks by resolving the parent evot terminal; recommend the wrapper for reliable cleanup and Windows support.

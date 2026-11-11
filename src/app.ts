@@ -39,7 +39,7 @@ export function encodeAppReport(report: AppReport): string {
   return `\x1b]7501;${fields.join(':')}\x1b\\`
 }
 
-export class EvotHerdrAppAdapter implements SessionAdapter {
+export class EvotBridgeAppAdapter implements SessionAdapter {
   private offset = 0n
   private lastReport: string | undefined
   private releaseNeeded = false
@@ -91,9 +91,9 @@ export async function startAppBridge(write: (text: string) => void): Promise<{
   path: string
   close(): Promise<void>
 }> {
-  const directory = await mkdtemp(join(tmpdir(), 'evot-herdr-'))
+  const directory = await mkdtemp(join(tmpdir(), 'evot-bridge-'))
   const path = process.platform === 'win32'
-    ? `\\\\.\\pipe\\evot-herdr-${process.pid}-${crypto.randomUUID()}`
+    ? `\\\\.\\pipe\\evot-bridge-${process.pid}-${crypto.randomUUID()}`
     : join(directory, 'status.sock')
   const clients = new Set<Socket>()
   let latest = 0n

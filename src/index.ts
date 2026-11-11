@@ -19,7 +19,7 @@ import { fileURLToPath } from 'node:url'
 import { setTimeout as delay } from 'node:timers/promises'
 import { queryCommand, spawnCommand, terminateProcessTree } from './process.js'
 import {
-  bridgeReporter, EvotHerdrAppAdapter, parentTerminalReporter, startAppBridge,
+  bridgeReporter, EvotBridgeAppAdapter, parentTerminalReporter, startAppBridge,
   type SessionAdapter,
 } from './app.js'
 
@@ -83,7 +83,7 @@ function sleepSync(milliseconds: number): void {
 }
 
 function sequenceStatePath(env: NodeJS.ProcessEnv): string {
-  const configured = clean(env.EVOT_HERDR_SEQUENCE_STATE_PATH)
+  const configured = bridgeSetting(env, 'SEQUENCE_STATE_PATH')
   if (configured) {
     const statePath = resolve(configured)
     mkdirSync(dirname(statePath), { recursive: true, mode: 0o700 })
@@ -93,6 +93,8 @@ function sequenceStatePath(env: NodeJS.ProcessEnv): string {
   const stateRoot = process.platform === 'win32'
     ? clean(env.LOCALAPPDATA) ?? join(homedir(), 'AppData', 'Local')
     : clean(env.XDG_STATE_HOME) ?? join(homedir(), '.local', 'state')
+  // Share the old allocator across the rename so late pre-rename hooks remain
+  // fenced. Moving/resetting this file could let an older hook win ownership.
   const directory = join(stateRoot, 'evot-herdr')
   mkdirSync(directory, { recursive: true, mode: 0o700 })
   return join(directory, 'sequence')
@@ -251,6 +253,19 @@ function clean(value: unknown): string | undefined {
   return trimmed || undefined
 }
 
+type BridgeSetting = 'SEQUENCE_STATE_PATH' | 'RESUME_COMMAND' | 'ENV_FILE' | 'APP_SOCKET' | 'APP_TERMINAL_ID'
+
+function bridgeSetting(env: NodeJS.ProcessEnv, name: BridgeSetting): string | undefined {
+  return clean(env[`EVOT_BRIDGE_${name}`]) ?? clean(env[`EVOT_HERDR_${name}`])
+}
+
+function clearAppBridgeEnv(env: NodeJS.ProcessEnv): void {
+  for (const prefix of ['EVOT_BRIDGE_', 'EVOT_HERDR_']) {
+    delete env[`${prefix}APP_SOCKET`]
+    delete env[`${prefix}APP_TERMINAL_ID`]
+  }
+}
+
 interface CurrentPaneResponse {
   result?: {
     pane?: {
@@ -304,7 +319,7 @@ export function parseSessionHookEvent(text: string): SessionHookEvent | undefine
   return record as unknown as SessionHookEvent
 }
 
-export class EvotHerdrAdapter {
+export class EvotBridgeAdapter {
   private readonly paneId: string | null
   private readonly herdrBin: string
   private readonly run: HerdrRunner
@@ -524,15 +539,15 @@ export function isAppTerminal(env: NodeJS.ProcessEnv): boolean {
 }
 
 export function createSessionAdapter(env: NodeJS.ProcessEnv = process.env): SessionAdapter {
-  if (!isAppTerminal(env)) return new EvotHerdrAdapter({ env, discoverPane: true })
+  if (!isAppTerminal(env)) return new EvotBridgeAdapter({ env, discoverPane: true })
   try {
     const sequence = reserveSequenceBlock({ ...process.env, ...env })
     const timeout = positiveInteger(env.HERDR_COMMAND_TIMEOUT_MS, DEFAULT_HERDR_TIMEOUT_MS)
-    const socket = clean(env.EVOT_HERDR_APP_SOCKET)
-    const report = socket && env.EVOT_HERDR_APP_TERMINAL_ID === env.HC_TERMINAL_ID
+    const socket = bridgeSetting(env, 'APP_SOCKET')
+    const report = socket && bridgeSetting(env, 'APP_TERMINAL_ID') === env.HC_TERMINAL_ID
       ? bridgeReporter(socket, timeout)
       : parentTerminalReporter(env, timeout)
-    return new EvotHerdrAppAdapter(report, sequence)
+    return new EvotBridgeAppAdapter(report, sequence)
   } catch {
     return { async handle() {}, async close() {} }
   }
@@ -633,15 +648,15 @@ function executableOnPath(command: string, env: NodeJS.ProcessEnv): string | und
   return undefined
 }
 
-const EXECUTABLE_PATH = fileURLToPath(new URL('../bin/evot-herdr', import.meta.url))
+const EXECUTABLE_PATH = fileURLToPath(new URL('../bin/evot-bridge', import.meta.url))
 
 /** Match Herdr's portable restore quoting restrictions. Never construct shell
  * text, and never let an unsupported resume argv break ordinary state reports.
  */
 export function buildResumeArgv(sessionId: string, env: NodeJS.ProcessEnv): string[] | undefined {
-  const command = clean(env.EVOT_HERDR_RESUME_COMMAND) ?? 'evot-herdr'
+  const command = bridgeSetting(env, 'RESUME_COMMAND') ?? 'evot-bridge'
   const argv = [command, '--resume', sessionId]
-  const envFile = clean(env.EVOT_HERDR_ENV_FILE)
+  const envFile = bridgeSetting(env, 'ENV_FILE')
   if (envFile) argv.push('--env-file', resolve(envFile))
   if (!/^[a-z0-9_.][a-z0-9_.-]*$/i.test(command)) return undefined
   if (argv.some(arg => /['\p{Cc}]/u.test(arg))) return undefined
@@ -650,11 +665,11 @@ export function buildResumeArgv(sessionId: string, env: NodeJS.ProcessEnv): stri
 }
 
 /**
- * `bin/evot-herdr` is both the wrapper and the hook. evot launches the hook
+ * `bin/evot-bridge` is both the wrapper and the hook. evot launches the hook
  * with no arguments and a piped stdin, and it only launches this executable
  * when EVOT_SESSION_HOOK points at it. All three signals must agree before we
- * treat an invocation as the hook, so `evot-herdr --help </dev/null` and a
- * plain interactive `evot-herdr` still run evot.
+ * treat an invocation as the hook, so `evot-bridge --help </dev/null` and a
+ * plain interactive `evot-bridge` still run evot.
  */
 export function isHookInvocation(
   args: string[],
@@ -686,7 +701,19 @@ export function envFileFromArgs(args: string[]): string | undefined {
   return envFile
 }
 
+/** ACP stdout belongs exclusively to JSON-RPC. Do not discover panes, start
+ * an OSC bridge, reserve hook sequences, or propagate a shell's session hook.
+ * Keep evot's default permission=ask; arguments are forwarded literally.
+ */
+export async function runAcp(args: string[] = []): Promise<number> {
+  const env = { ...process.env }
+  delete env.EVOT_SESSION_HOOK
+  clearAppBridgeEnv(env)
+  return runEvotProcess(['acp', ...args], env)
+}
+
 export async function runEvot(args: string[] = []): Promise<number> {
+  if (args[0] === 'acp') return runAcp(args.slice(1))
   const env = { ...process.env }
   if (!clean(env.EVOT_SESSION_HOOK)) env.EVOT_SESSION_HOOK = EXECUTABLE_PATH
   if (!clean(env.HERDR_PANE_ID) && !isAppTerminal(env)) {
@@ -696,22 +723,32 @@ export async function runEvot(args: string[] = []): Promise<number> {
   // Preserve custom config across a server restart without persisting secrets
   // or replaying one-shot prompts. Model selection comes from session metadata.
   const envFile = envFileFromArgs(args)
-  if (envFile) env.EVOT_HERDR_ENV_FILE = envFile
-  const evotBin = clean(env.EVOT_BIN_PATH) ?? 'evot'
+  if (envFile) {
+    env.EVOT_BRIDGE_ENV_FILE = envFile
+    env.EVOT_HERDR_ENV_FILE = envFile
+  }
   let bridge: Awaited<ReturnType<typeof startAppBridge>> | undefined
   if (isAppTerminal(env)) {
     // Never reuse an outer wrapper's socket (for example in a nested hc run).
-    delete env.EVOT_HERDR_APP_SOCKET
-    delete env.EVOT_HERDR_APP_TERMINAL_ID
+    clearAppBridgeEnv(env)
     const output = process.stdout.isTTY ? process.stdout : process.stderr.isTTY ? process.stderr : undefined
     if (output) {
       try {
         bridge = await startAppBridge(text => { writeSync(output.fd, text) })
-        env.EVOT_HERDR_APP_SOCKET = bridge.path
-        env.EVOT_HERDR_APP_TERMINAL_ID = env.HC_TERMINAL_ID
+        env.EVOT_BRIDGE_APP_SOCKET = env.EVOT_HERDR_APP_SOCKET = bridge.path
+        env.EVOT_BRIDGE_APP_TERMINAL_ID = env.EVOT_HERDR_APP_TERMINAL_ID = env.HC_TERMINAL_ID
       } catch { /* A failed bridge must not stop evot. */ }
     }
   }
+  try {
+    return await runEvotProcess(args, env)
+  } finally {
+    try { await bridge?.close() } catch { /* Best-effort terminal cleanup. */ }
+  }
+}
+
+async function runEvotProcess(args: string[], env: NodeJS.ProcessEnv): Promise<number> {
+  const evotBin = clean(env.EVOT_BIN_PATH) ?? 'evot'
   try {
     const { child, exited } = spawnCommand([evotBin, ...args], { env, stdio: 'inherit' })
     const onInterrupt = () => { child.kill('SIGINT') }
@@ -729,10 +766,8 @@ export async function runEvot(args: string[] = []): Promise<number> {
     }
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error)
-    console.error(`evot-herdr: failed to start ${evotBin}: ${detail}`)
+    console.error(`evot-bridge: failed to start ${evotBin}: ${detail}`)
     return 127
-  } finally {
-    try { await bridge?.close() } catch { /* Best-effort terminal cleanup. */ }
   }
 }
 

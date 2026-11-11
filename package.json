@@ -1,12 +1,12 @@
 {
-  "name": "@evotai/evot-herdr",
+  "name": "@evotai/evot-bridge",
   "version": "0.3.0",
-  "description": "Node.js session-hook adapter for evot with Herdr CLI and herdr-app support",
+  "description": "evot integration for Herdr CLI, herdr-app, and T3 Code via ACP",
   "type": "module",
   "engines": { "node": ">=22.12.0" },
-  "bin": { "evot-herdr": "./bin/evot-herdr" },
+  "bin": { "evot-bridge": "./bin/evot-bridge" },
   "files": ["bin/", "dist/", "README.md", "CHANGELOG.md"],
-  "repository": { "type": "git", "url": "git+https://github.com/sundy-li/evot-herdr.git" },
+  "repository": { "type": "git", "url": "git+https://github.com/sundy-li/evot-bridge.git" },
   "publishConfig": { "access": "public", "registry": "https://registry.npmjs.org" },
   "packageManager": "pnpm@11.3.0",
   "scripts": {

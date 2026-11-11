@@ -2,17 +2,17 @@ import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, describe, expect, test } from 'vitest'
-import { buildResumeArgv, envFileFromArgs, EvotHerdrAdapter, runAdapter, runEvot } from '../src/index.js'
+import { buildResumeArgv, envFileFromArgs, EvotBridgeAdapter, runAdapter, runEvot } from '../src/index.js'
 import { queryCommand, terminateProcessTree } from '../src/process.js'
 
-const directory = await mkdtemp(join(tmpdir(), 'evot-herdr-resume-'))
-const env = { ...process.env, HERDR_PANE_ID: 'w1:p1', EVOT_HERDR_SEQUENCE_STATE_PATH: join(directory, 'sequence') }
+const directory = await mkdtemp(join(tmpdir(), 'evot-bridge-resume-'))
+const env = { ...process.env, HERDR_PANE_ID: 'w1:p1', EVOT_BRIDGE_SEQUENCE_STATE_PATH: join(directory, 'sequence') }
 afterAll(() => rm(directory, { recursive: true, force: true }))
 
 function recorder(supportsResume = true, extraEnv: NodeJS.ProcessEnv = {}) {
   const commands: string[][] = []
   let probes = 0
-  const adapter = new EvotHerdrAdapter({
+  const adapter = new EvotBridgeAdapter({
     env: { ...env, ...extraEnv },
     supportsResume: () => { probes++; return supportsResume },
     run: async argv => { commands.push(argv); return true },
@@ -35,7 +35,7 @@ describe('Herdr conversation restore', () => {
     await adapter.handle({ version: 1, event: 'session_started', session_id: 'session-1' })
     await adapter.handle({ version: 1, event: 'state_changed', session_id: 'session-1', state: 'working' })
     expect(commands[0]?.[2]).toBe('report-agent')
-    expect(resume(registrations(commands)[0]!)).toEqual(['evot-herdr', '--resume', 'session-1'])
+    expect(resume(registrations(commands)[0]!)).toEqual(['evot-bridge', '--resume', 'session-1'])
     expect(registrations(commands)).toHaveLength(1)
     expect(probes()).toBe(1)
   })
@@ -47,7 +47,7 @@ describe('Herdr conversation restore', () => {
     await adapter.handle({ version: 1, event: 'session_started', session_id: 'new' })
     expect(commands.some(argv => argv[2] === 'release-agent')).toBe(false)
     expect(registrations(commands).map(resume)).toEqual([
-      ['evot-herdr', '--resume', 'old'], ['evot-herdr', '--resume', 'new'],
+      ['evot-bridge', '--resume', 'old'], ['evot-bridge', '--resume', 'new'],
     ])
     expect(probes()).toBe(1)
     await adapter.close()
@@ -74,14 +74,14 @@ if [ "$3" = "--help" ]; then
 fi
 `)
     const commands: string[][] = []
-    const adapter = new EvotHerdrAdapter({
+    const adapter = new EvotBridgeAdapter({
       env: { ...env, HERDR_BIN_PATH: herdr, PROBE_CAPTURE: calls },
       run: async argv => { commands.push(argv) },
     })
     await adapter.handle({ version: 1, event: 'session_started', session_id: 'one' })
     await adapter.handle({ version: 1, event: 'session_started', session_id: 'two' })
     expect(registrations(commands).map(resume)).toEqual([
-      ['evot-herdr', '--resume', 'one'], ['evot-herdr', '--resume', 'two'],
+      ['evot-bridge', '--resume', 'one'], ['evot-bridge', '--resume', 'two'],
     ])
     expect(await readFile(calls, 'utf8')).toBe('help\n')
   })
@@ -90,7 +90,7 @@ fi
     const legacy = await executable('herdr-legacy', "echo 'Arguments: <PANE_ID>'\n")
     for (const bin of [legacy, join(directory, 'missing-herdr')]) {
       const commands: string[][] = []
-      const adapter = new EvotHerdrAdapter({ env: { ...env, HERDR_BIN_PATH: bin }, run: async argv => { commands.push(argv) } })
+      const adapter = new EvotBridgeAdapter({ env: { ...env, HERDR_BIN_PATH: bin }, run: async argv => { commands.push(argv) } })
       await adapter.handle({ version: 1, event: 'session_started', session_id: 'one' })
       expect(registrations(commands)[0]).not.toContain('--')
       await adapter.close()
@@ -102,7 +102,7 @@ fi
     const commands: string[][] = []
     let ownership = false
     let registered = false
-    const adapter = new EvotHerdrAdapter({
+    const adapter = new EvotBridgeAdapter({
       env, supportsResume: () => true,
       run: async argv => {
         commands.push(argv)
@@ -116,7 +116,7 @@ fi
     await adapter.handle({ version: 1, event: 'state_changed', state: 'idle' })
     await adapter.handle({ version: 1, event: 'state_changed', state: 'idle' })
     expect(registrations(commands).map(resume)).toEqual([
-      ['evot-herdr', '--resume', 'one'], ['evot-herdr', '--resume', 'one'],
+      ['evot-bridge', '--resume', 'one'], ['evot-bridge', '--resume', 'one'],
     ])
   })
 
@@ -125,7 +125,7 @@ fi
     // late hook reports. The adapter must still release on ordinary exits.
     let stopping = false
     let live: string[] | undefined
-    const adapter = new EvotHerdrAdapter({
+    const adapter = new EvotBridgeAdapter({
       env, supportsResume: () => true,
       run: async argv => {
         if (stopping) return false
@@ -138,7 +138,7 @@ fi
     const snapshot = structuredClone(live)
     stopping = true
     await adapter.close()
-    expect(snapshot).toEqual(['evot-herdr', '--resume', 'saved'])
+    expect(snapshot).toEqual(['evot-bridge', '--resume', 'saved'])
     const { adapter: normal, commands } = recorder()
     async function* events() {
       yield JSON.stringify({ version: 1, event: 'session_started', session_id: 'quit' })
@@ -150,7 +150,7 @@ fi
 
   test('preserves custom env-file from wrapper startup without saving prompt text or secrets', async () => {
     const capture = join(directory, 'captured-env')
-    const evot = await executable('capture-evot', 'printf "%s" "$EVOT_HERDR_ENV_FILE" > "$CAPTURE"\n')
+    const evot = await executable('capture-evot', 'printf "%s" "$EVOT_BRIDGE_ENV_FILE" > "$CAPTURE"\n')
     const previous = { ...process.env }
     try {
       process.env.EVOT_BIN_PATH = evot
@@ -158,8 +158,8 @@ fi
       expect(await runEvot(['--env-file', 'custom config.env', '-p', 'private prompt'])).toBe(0)
       const envFile = await readFile(capture, 'utf8')
       expect(envFile.endsWith('/custom config.env')).toBe(true)
-      expect(buildResumeArgv('saved', { EVOT_HERDR_ENV_FILE: envFile })).toEqual([
-        'evot-herdr', '--resume', 'saved', '--env-file', envFile,
+      expect(buildResumeArgv('saved', { EVOT_BRIDGE_ENV_FILE: envFile })).toEqual([
+        'evot-bridge', '--resume', 'saved', '--env-file', envFile,
       ])
     } finally { process.env = previous }
   })
@@ -173,14 +173,14 @@ fi
   })
 
   test('validates portable argv without handing arbitrary shell text to Herdr', () => {
-    expect(buildResumeArgv('one', { EVOT_HERDR_RESUME_COMMAND: 'evot' })).toEqual(['evot', '--resume', 'one'])
+    expect(buildResumeArgv('one', { EVOT_BRIDGE_RESUME_COMMAND: 'evot' })).toEqual(['evot', '--resume', 'one'])
     for (const command of ['/path/to/evot', '-evot', 'evot;exit', "ev'ot"]) {
-      expect(buildResumeArgv('one', { EVOT_HERDR_RESUME_COMMAND: command })).toBeUndefined()
+      expect(buildResumeArgv('one', { EVOT_BRIDGE_RESUME_COMMAND: command })).toBeUndefined()
     }
     expect(buildResumeArgv("can't-quote", {})).toBeUndefined()
     expect(buildResumeArgv('bad\nvalue', {})).toBeUndefined()
-    expect(buildResumeArgv('one', { EVOT_HERDR_ENV_FILE: "can't-quote.env" })).toBeUndefined()
-    expect(buildResumeArgv('one', { EVOT_HERDR_ENV_FILE: '中'.repeat(3000) })).toBeUndefined()
+    expect(buildResumeArgv('one', { EVOT_BRIDGE_ENV_FILE: "can't-quote.env" })).toBeUndefined()
+    expect(buildResumeArgv('one', { EVOT_BRIDGE_ENV_FILE: '中'.repeat(3000) })).toBeUndefined()
   })
 
   test('failed command lookup never signals the caller process group', () => {

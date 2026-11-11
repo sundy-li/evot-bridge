@@ -6,20 +6,20 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, test } from 'vitest'
 import {
-  bridgeReporter, encodeAppReport, EvotHerdrAppAdapter, startAppBridge,
+  bridgeReporter, encodeAppReport, EvotBridgeAppAdapter, startAppBridge,
   type AppReport,
 } from '../src/app.js'
-import { createSessionAdapter, EvotHerdrAdapter, isAppTerminal, runAdapter } from '../src/index.js'
+import { createSessionAdapter, EvotBridgeAdapter, isAppTerminal, runAdapter } from '../src/index.js'
 import { spawnCommand } from '../src/process.js'
 
-const executable = fileURLToPath(new URL('../bin/evot-herdr', import.meta.url))
+const executable = fileURLToPath(new URL('../bin/evot-bridge', import.meta.url))
 const event = (name: string, extra = {}) => JSON.stringify({ version: 1, event: name, ...extra })
 const osc = (state: string) => `\x1b]7501;state=${state}:app=evot\x1b\\`
 async function* lines(...values: string[]) { yield* values }
 
 function recorder(fail = false) {
   const reports: AppReport[] = []
-  const adapter = new EvotHerdrAppAdapter(async report => { reports.push(report); return !fail }, 1_000_000n)
+  const adapter = new EvotBridgeAppAdapter(async report => { reports.push(report); return !fail }, 1_000_000n)
   return { adapter, reports }
 }
 
@@ -54,7 +54,7 @@ describe('herdr-app lifecycle', () => {
   test('retries failed state and release reports; no clear before any activity', async () => {
     let succeeds = false
     const reports: AppReport[] = []
-    const adapter = new EvotHerdrAppAdapter(async report => { reports.push(report); return succeeds }, 0n)
+    const adapter = new EvotBridgeAppAdapter(async report => { reports.push(report); return succeeds }, 0n)
     await adapter.close()
     expect(reports).toHaveLength(0)
     await adapter.handle({ version: 1, event: 'run_started' })
@@ -90,7 +90,7 @@ describe('herdr-app lifecycle', () => {
     expect(isAppTerminal({ HC_TERMINAL_ID: 't3' })).toBe(true)
     expect(isAppTerminal({ HC_TERMINAL_ID: 't3', HERDR_PANE_ID: 'w1:p1' })).toBe(false)
     expect(isAppTerminal({ HC_TERMINAL_ID: ' ' })).toBe(false)
-    expect(createSessionAdapter({ HERDR_PANE_ID: 'w1:p1' })).toBeInstanceOf(EvotHerdrAdapter)
+    expect(createSessionAdapter({ HERDR_PANE_ID: 'w1:p1' })).toBeInstanceOf(EvotBridgeAdapter)
   })
 })
 
@@ -143,8 +143,8 @@ describe('private terminal bridge', () => {
   })
 
   test('bounds a nonresponsive bridge', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'evot-herdr-test-'))
-    const path = process.platform === 'win32' ? `\\\\.\\pipe\\evot-herdr-test-${crypto.randomUUID()}` : join(directory, 'hang.sock')
+    const directory = await mkdtemp(join(tmpdir(), 'evot-bridge-test-'))
+    const path = process.platform === 'win32' ? `\\\\.\\pipe\\evot-bridge-test-${crypto.randomUUID()}` : join(directory, 'hang.sock')
     const clients: import('node:net').Socket[] = []
     const server = createServer(socket => clients.push(socket))
     await new Promise<void>(resolve => server.listen(path, resolve))
@@ -158,7 +158,7 @@ describe('private terminal bridge', () => {
   })
 
   test.skipIf(process.platform === 'win32')('hook SIGTERM clears App status and preserves signal exit status', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'evot-herdr-test-'))
+    const directory = await mkdtemp(join(tmpdir(), 'evot-bridge-test-'))
     const output: string[] = []
     let started!: () => void
     const ready = new Promise<void>(resolve => { started = resolve })
@@ -166,9 +166,9 @@ describe('private terminal bridge', () => {
     const { child, exited } = spawnCommand([process.execPath, executable], {
       env: {
         ...process.env, HERDR_PANE_ID: '', HC_TERMINAL_ID: 'test-signal',
-        EVOT_SESSION_HOOK: executable, EVOT_HERDR_APP_SOCKET: bridge.path,
-        EVOT_HERDR_APP_TERMINAL_ID: 'test-signal',
-        EVOT_HERDR_SEQUENCE_STATE_PATH: join(directory, 'sequence'),
+        EVOT_SESSION_HOOK: executable, EVOT_BRIDGE_APP_SOCKET: bridge.path,
+        EVOT_BRIDGE_APP_TERMINAL_ID: 'test-signal',
+        EVOT_BRIDGE_SEQUENCE_STATE_PATH: join(directory, 'sequence'),
       },
       detached: true, stdio: ['pipe', 'ignore', 'ignore'],
     })
@@ -186,7 +186,7 @@ describe('private terminal bridge', () => {
   })
 
   test('a real detached hook reports through the bridge with discarded stdout/stderr', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'evot-herdr-test-'))
+    const directory = await mkdtemp(join(tmpdir(), 'evot-bridge-test-'))
     const output: string[] = []
     const bridge = await startAppBridge(text => output.push(text))
     try {
@@ -194,8 +194,8 @@ describe('private terminal bridge', () => {
         env: {
           ...process.env, HERDR_PANE_ID: '', HC_TERMINAL_ID: 'test-terminal',
           EVOT_SESSION_HOOK: executable, HERDR_BIN_PATH: '/must/not/be/called',
-          EVOT_HERDR_APP_SOCKET: bridge.path, EVOT_HERDR_APP_TERMINAL_ID: 'test-terminal',
-          EVOT_HERDR_SEQUENCE_STATE_PATH: join(directory, 'sequence'),
+          EVOT_BRIDGE_APP_SOCKET: bridge.path, EVOT_BRIDGE_APP_TERMINAL_ID: 'test-terminal',
+          EVOT_BRIDGE_SEQUENCE_STATE_PATH: join(directory, 'sequence'),
         },
         detached: process.platform !== 'win32', stdio: ['pipe', 'ignore', 'ignore'],
       })
@@ -215,7 +215,7 @@ const python = process.platform === 'win32' ? undefined
   : spawnSync('python3', ['-c', 'import pty'], { stdio: 'ignore' }).status === 0 ? 'python3' : undefined
 
 test.skipIf(!python)('wrapper and plain evot hooks work in a real POSIX PTY', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'evot-herdr-pty-'))
+  const directory = await mkdtemp(join(tmpdir(), 'evot-bridge-pty-'))
   const evot = join(directory, 'evot')
   const capture = join(directory, 'capture')
   await writeFile(evot, `#!${process.execPath}
@@ -248,9 +248,9 @@ sys.exit(os.waitstatus_to_exitcode(status))
       const env = {
         ...process.env, HERDR_PANE_ID: '', HC_TERMINAL_ID: 'test-pty',
         EVOT_BIN_PATH: evot, EVOT_SESSION_HOOK: wrapper ? '' : executable,
-        EVOT_HERDR_APP_SOCKET: '', EVOT_HERDR_APP_TERMINAL_ID: '',
+        EVOT_BRIDGE_APP_SOCKET: '', EVOT_BRIDGE_APP_TERMINAL_ID: '',
         HERDR_BIN_PATH: '/must/not/be/called', CAPTURE: capture,
-        EVOT_HERDR_SEQUENCE_STATE_PATH: join(directory, 'sequence'),
+        EVOT_BRIDGE_SEQUENCE_STATE_PATH: join(directory, 'sequence'),
       }
       const { exited } = spawnCommand([python!, '-c', script, wrapper ? process.execPath : evot, ...(wrapper ? [executable] : [])], {
         env, stdio: 'ignore',

@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "@evotai/evot-herdr",
+      "name": "@evotai/evot-bridge",
       "devDependencies": {
         "@types/node": "^22.0.0",
         "typescript": "5.9.3",

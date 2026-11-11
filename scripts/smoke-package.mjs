@@ -6,7 +6,7 @@ import { join, delimiter } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
-const temporary = await mkdtemp(join(tmpdir(), 'evot-herdr-package-'))
+const temporary = await mkdtemp(join(tmpdir(), 'evot-bridge-package-'))
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm'
 const npmRun = args => execFileSync(npm, args, { cwd: root, encoding: 'utf8' })
 try {
@@ -16,11 +16,14 @@ try {
   assert(packed.files.some(file => file.path === 'dist/index.js'))
   assert(packed.files.some(file => file.path === 'dist/process.js'))
   assert(packed.files.some(file => file.path === 'dist/app.js'))
+  assert.deepEqual(packed.files.filter(file => file.path.startsWith('bin/')).map(file => file.path), ['bin/evot-bridge'])
+  const manifest = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'))
+  assert.deepEqual(manifest.bin, { 'evot-bridge': './bin/evot-bridge' })
   assert(!packed.files.some(file => file.path.startsWith('src/') || file.path.startsWith('node_modules/')))
   const prefix = join(temporary, 'install')
   npmRun(['install', '--global', '--prefix', prefix, '--ignore-scripts', '--offline', '--no-audit', '--no-fund', archive])
   const modules = npmRun(['root', '--global', '--prefix', prefix]).trim()
-  const installed = join(modules, '@evotai', 'evot-herdr', 'bin', 'evot-herdr')
+  const installed = join(modules, '@evotai', 'evot-bridge', 'bin', 'evot-bridge')
   const bin = join(temporary, 'bin')
   await mkdir(bin)
   await symlink(process.execPath, join(bin, process.platform === 'win32' ? 'node.exe' : 'node'))
@@ -34,6 +37,11 @@ else fs.appendFileSync(process.env.CAPTURE, JSON.stringify(process.argv.slice(2)
 `)
   await writeFile(evot, `#!/usr/bin/env node
 const { spawnSync } = require('node:child_process');
+if (process.argv[2] === 'acp') {
+  if (process.env.EVOT_SESSION_HOOK || process.env.EVOT_BRIDGE_APP_SOCKET || process.env.EVOT_HERDR_APP_SOCKET) process.exit(99);
+  process.stdin.pipe(process.stdout);
+  process.stdin.on('end', () => { process.exitCode = 29; });
+} else {
 if (process.argv.includes('--help')) process.exit(23);
 const events = [
   {version: 1, event: 'session_started', session_id: 'saved-package-session'},
@@ -43,6 +51,7 @@ const result = spawnSync(process.env.EVOT_SESSION_HOOK, [], {
   env: process.env, input: events.map(event => JSON.stringify(event)).join('\\n') + '\\n', stdio: ['pipe', 'inherit', 'inherit']
 });
 process.exit(result.status ?? 1);
+}
 `)
   await chmod(herdr, 0o755)
   await chmod(evot, 0o755)
@@ -51,7 +60,7 @@ process.exit(result.status ?? 1);
     PATH: [bin, '/usr/bin', '/bin'].join(delimiter),
     HOME: temporary, CAPTURE: capture, HERDR_PANE_ID: 'package:pane',
     HERDR_BIN_PATH: herdr, EVOT_BIN_PATH: evot,
-    EVOT_HERDR_SEQUENCE_STATE_PATH: join(temporary, 'sequence'),
+    EVOT_BRIDGE_SEQUENCE_STATE_PATH: join(temporary, 'sequence'),
   }
   const run = args => spawnSync(process.execPath, [installed, ...args], { env, encoding: 'utf8', timeout: 10_000 })
   assert.equal(run(['--help']).status, 23, 'installed wrapper must preserve exit status')
@@ -60,9 +69,19 @@ process.exit(result.status ?? 1);
   const commands = (await readFile(capture, 'utf8')).trim().split('\n').map(line => JSON.parse(line))
   const registration = commands.find(argv => argv[1] === 'report-agent-session')
   assert(registration, 'installed hook must register the session')
-  assert.deepEqual(registration.slice(registration.indexOf('--') + 1), ['evot-herdr', '--resume', 'saved-package-session'])
+  assert.deepEqual(registration.slice(registration.indexOf('--') + 1), ['evot-bridge', '--resume', 'saved-package-session'])
   assert(commands.some(argv => argv[1] === 'release-agent'), 'installed hook must release on exit')
-  console.log('Package smoke passed: offline npm install, Node-only wrapper/hook, resume argv, exit status, release.')
+  const acpInput = '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":2}}\n'
+  const acp = spawnSync(process.execPath, [installed, 'acp'], {
+    env: {
+      ...env, EVOT_SESSION_HOOK: '/must/not/run', EVOT_BRIDGE_APP_SOCKET: '/outer/socket',
+      EVOT_HERDR_APP_SOCKET: '/legacy/socket',
+    },
+    input: acpInput, encoding: 'utf8', timeout: 10_000,
+  })
+  assert.equal(acp.status, 29, acp.stderr || String(acp.error))
+  assert.equal(acp.stdout, acpInput, 'installed ACP transport must remain byte-transparent')
+  console.log('Package smoke passed: single evot-bridge executable, offline install, terminal hooks, resume argv, exit status, release, ACP mode.')
 } finally {
   await rm(temporary, { recursive: true, force: true })
 }
