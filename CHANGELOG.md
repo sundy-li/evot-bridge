@@ -2,6 +2,7 @@
 
 ## 0.3.0 (unreleased)
 
+- Repair inherited `EVOT_SESSION_HOOK` values pointing to removed evot-herdr launchers in terminal wrapper mode; preserve existing legacy installations and unrelated custom hooks.
 - Rename the project/package to `evot-bridge` / `@evotai/evot-bridge` and install only `evot-bridge`. Migrate Herdr/hook executable paths and T3 settings (`evot-bridge` plus argument `acp`).
 - Prefer `EVOT_BRIDGE_*` settings while accepting legacy `EVOT_HERDR_*` aliases; retain the shared legacy sequence allocator to preserve stale-hook fencing during upgrades.
 - Use a single `evot-bridge` entry point: terminal integration by default and `evot-bridge acp` for T3 Code's Local ACP command, launching evot's native ACP server with byte-transparent stdio, inherited-hook isolation, and no pane discovery or OSC output.

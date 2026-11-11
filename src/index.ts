@@ -14,7 +14,7 @@ import {
   writeSync,
 } from 'node:fs'
 import { homedir } from 'node:os'
-import { delimiter, dirname, join, resolve } from 'node:path'
+import { basename, delimiter, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { setTimeout as delay } from 'node:timers/promises'
 import { queryCommand, spawnCommand, terminateProcessTree } from './process.js'
@@ -650,6 +650,21 @@ function executableOnPath(command: string, env: NodeJS.ProcessEnv): string | und
 
 const EXECUTABLE_PATH = fileURLToPath(new URL('../bin/evot-bridge', import.meta.url))
 
+/** Repair a removed pre-rename launcher inherited from an older shell. Keep
+ * existing legacy installations and all unrelated custom hooks untouched.
+ */
+function isMissingLegacyHook(hook: string, env: NodeJS.ProcessEnv): boolean {
+  if (!/^evot-herdr(?:\.(?:cmd|exe|bat))?$/i.test(basename(hook))) return false
+  const path = executableOnPath(hook, env) ?? resolve(hook)
+  try {
+    statSync(path)
+    return false
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code
+    return code === 'ENOENT' || code === 'ENOTDIR'
+  }
+}
+
 /** Match Herdr's portable restore quoting restrictions. Never construct shell
  * text, and never let an unsupported resume argv break ordinary state reports.
  */
@@ -715,7 +730,8 @@ export async function runAcp(args: string[] = []): Promise<number> {
 export async function runEvot(args: string[] = []): Promise<number> {
   if (args[0] === 'acp') return runAcp(args.slice(1))
   const env = { ...process.env }
-  if (!clean(env.EVOT_SESSION_HOOK)) env.EVOT_SESSION_HOOK = EXECUTABLE_PATH
+  const configuredHook = clean(env.EVOT_SESSION_HOOK)
+  if (!configuredHook || isMissingLegacyHook(configuredHook, env)) env.EVOT_SESSION_HOOK = EXECUTABLE_PATH
   if (!clean(env.HERDR_PANE_ID) && !isAppTerminal(env)) {
     const paneId = currentPaneId(env)
     if (paneId) env.HERDR_PANE_ID = paneId

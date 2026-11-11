@@ -4,7 +4,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { file, spawnTest } from './helpers.js'
 const testDirectory = fileURLToPath(new URL('.', import.meta.url))
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { afterAll, describe, expect, test } from 'vitest'
 import {
   EvotBridgeAdapter,
@@ -708,6 +708,22 @@ printf '%s\\n' "$*" >> "$HERDR_CAPTURE"
       const customHook = join(directory, 'custom-hook')
       expect(await spawn([], { ...baseEnv, EVOT_SESSION_HOOK: customHook })).toBe(0)
       expect((await file(evotCapture).text()).trim()).toBe(`|${customHook}`)
+
+      // A stale shell setting from before the rename must not disable reporting.
+      for (const staleHook of [join(directory, 'removed', 'evot-herdr'), 'evot-herdr']) {
+        await rm(evotCapture, { force: true })
+        expect(await spawn([], {
+          ...baseEnv, PATH: `${dirname(process.execPath)}:/usr/bin:/bin`, EVOT_SESSION_HOOK: staleHook,
+        })).toBe(0)
+        expect((await file(evotCapture).text()).trim()).toBe(`|${wrapper}`)
+      }
+
+      // Do not replace an existing legacy installation, even after the rename.
+      await rm(evotCapture, { force: true })
+      const legacyHook = join(directory, 'evot-herdr')
+      await writeExecutable(legacyHook, '#!/bin/sh\nexit 0\n')
+      expect(await spawn([], { ...baseEnv, EVOT_SESSION_HOOK: legacyHook })).toBe(0)
+      expect((await file(evotCapture).text()).trim()).toBe(`|${legacyHook}`)
 
       // Wrapper mode: unset hook defaults to this executable.
       await rm(evotCapture, { force: true })

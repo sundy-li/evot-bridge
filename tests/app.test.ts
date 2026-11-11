@@ -244,10 +244,12 @@ open(os.environ['CAPTURE'], 'wb').write(output)
 sys.exit(os.waitstatus_to_exitcode(status))
 `
   try {
-    for (const wrapper of [true, false]) {
+    for (const mode of ['wrapper', 'stale-legacy-hook', 'plain-hook']) {
+      const wrapper = mode !== 'plain-hook'
       const env = {
         ...process.env, HERDR_PANE_ID: '', HC_TERMINAL_ID: 'test-pty',
-        EVOT_BIN_PATH: evot, EVOT_SESSION_HOOK: wrapper ? '' : executable,
+        EVOT_BIN_PATH: evot, EVOT_SESSION_HOOK: mode === 'stale-legacy-hook'
+          ? join(directory, 'removed', 'evot-herdr') : wrapper ? '' : executable,
         EVOT_BRIDGE_APP_SOCKET: '', EVOT_BRIDGE_APP_TERMINAL_ID: '',
         HERDR_BIN_PATH: '/must/not/be/called', CAPTURE: capture,
         EVOT_BRIDGE_SEQUENCE_STATE_PATH: join(directory, 'sequence'),
