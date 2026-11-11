@@ -15,6 +15,7 @@ try {
   const archive = join(temporary, packed.filename)
   assert(packed.files.some(file => file.path === 'dist/index.js'))
   assert(packed.files.some(file => file.path === 'dist/process.js'))
+  assert(packed.files.some(file => file.path === 'dist/app.js'))
   assert(!packed.files.some(file => file.path.startsWith('src/') || file.path.startsWith('node_modules/')))
   const prefix = join(temporary, 'install')
   npmRun(['install', '--global', '--prefix', prefix, '--ignore-scripts', '--offline', '--no-audit', '--no-fund', archive])

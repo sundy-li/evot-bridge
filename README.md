@@ -8,7 +8,9 @@ A small, independent session-hook adapter that connects [evot](https://github.co
 
 - Runs as a transparent wrapper around `evot` and preserves its exit status.
 - Detects hook mode from three signals (self-referenced `EVOT_SESSION_HOOK`, no arguments, piped stdin) instead of stdin TTY state alone.
-- Reports `working`, `blocked`, and `idle` lifecycle states to Herdr.
+- Reports `working`, `blocked`, and `idle` lifecycle states to both legacy Herdr CLI and [herdr-app](https://github.com/herdrdev/herdr-app) / herdr-core (`hc`).
+- Automatically selects the App's OSC 7501 protocol in `hc` terminals, without requiring the legacy `herdr` executable.
+- Relays detached hooks through a private wrapper-owned terminal bridge, with stale-hook fencing and exit cleanup.
 - Registers `evot-herdr --resume <session_id>` for conversation restore after a Herdr server restart (Herdr 0.9.2+).
 - Keeps state/session reporting compatible with older Herdr versions through capability detection.
 - Replaces the restore target when sessions change, without releasing pane ownership between them.
@@ -22,30 +24,37 @@ A small, independent session-hook adapter that connects [evot](https://github.co
 ## Requirements
 
 - Node.js 22.12+ (no Bun, tsx, or runtime npm dependencies).
-- Herdr 0.9.2+ for automatic restore; older versions still receive lifecycle reports.
-- An installed `evot` executable, unless `EVOT_BIN_PATH` is set.
-- A Herdr installation available as `herdr`, or an explicit `HERDR_BIN_PATH`.
-- A Herdr-managed pane. The wrapper and directly launched hook can discover the current pane when `HERDR_PANE_ID` is absent.
+- Either herdr-app / herdr-core (`hc`), or legacy Herdr CLI. Legacy Herdr 0.9.2+ is required for automatic conversation restore; older versions still receive lifecycle reports.
+- An installed `evot` executable with `EVOT_SESSION_HOOK` support, unless `EVOT_BIN_PATH` is set.
+- For herdr-app: a core-managed terminal (`HC_TERMINAL_ID` is supplied by `hc`). The old `herdr` binary is not required.
+- For legacy CLI: a Herdr installation available as `herdr` (or `HERDR_BIN_PATH`) and a Herdr-managed pane. The wrapper and directly launched hook can discover the pane when `HERDR_PANE_ID` is absent.
 
 ## Usage
 
 ### Recommended: wrapper mode
 
-Install the release package (when published to npm):
+Install from a GitHub source checkout (Node.js 22.12+, npm, and Git required):
 
 ```bash
-npm install -g @evotai/evot-herdr
-# or: pnpm add -g @evotai/evot-herdr
+git clone https://github.com/sundy-li/evot-herdr.git
+cd evot-herdr
+npm install --include=dev --legacy-peer-deps
+npm link
 evot-herdr
 ```
 
-A GitHub release tarball is also directly installable:
+There is currently no npm registry release; no npm login or `@evotai` scope permission is required. `npm install` installs build-time dependencies and runs `prepare` to compile `dist/` automatically. Do not use `--ignore-scripts` for the install step. `--legacy-peer-deps` avoids npm resolver failures involving the test runner's optional browser/devtools peers; those integrations are not needed here. No Bun or runtime npm dependencies are needed.
+
+`npm link` makes `evot-herdr` available on `PATH`; keep the source checkout in place. Alternatively, skip `npm link` and run `./bin/evot-herdr`, or add the checkout's `bin/` directory to `PATH`. Avoid `npm install -g <Git URL>`: some npm versions propagate global-install settings into the Git dependency's build and fail to install its build-time dependencies.
+
+To update, run in the same checkout:
 
 ```bash
-npm install -g https://github.com/sundy-li/evot-herdr/releases/download/v0.2.0/evotai-evot-herdr-0.2.0.tgz
+git pull --ff-only
+npm install --include=dev --legacy-peer-deps
 ```
 
-For a source checkout, run `pnpm install && pnpm run build`, then add its `bin/` directory to `PATH`. The CLI runs compiled JavaScript from `dist/`, not TypeScript.
+To pin a revision, run `git checkout <commit-sha>` before installing. With pnpm, run `pnpm install --frozen-lockfile && pnpm run build`, then add the checkout's `bin/` directory to `PATH`. The CLI runs compiled JavaScript from `dist/`, not TypeScript.
 
 `evot-herdr` runs in wrapper mode unless all hook-mode conditions below hold. It:
 
@@ -67,6 +76,38 @@ EVOT_BIN_PATH=/path/to/evot "$PWD/bin/evot-herdr"
 ```
 
 If evot was already running before the hook was installed or changed, restart it so the new environment is applied.
+
+### herdr-app / herdr-core (`hc`)
+
+Inside a herdr-app terminal, run the same wrapper:
+
+```bash
+evot-herdr
+```
+
+The adapter detects `HC_TERMINAL_ID` and reports `app=evot` using OSC 7501. Working, approval-blocked, and idle states appear in the App's agents view. No `HERDR_PANE_ID`, `HERDR_BIN_PATH`, or legacy `herdr` command is needed. An explicit `HERDR_PANE_ID` takes precedence, supporting legacy Herdr nested inside an `hc` terminal.
+
+To add evot to the App's agent launcher, merge this entry into the `programs` object in `~/.config/herdr-app/programs.json` (or `$HERDR_APP_HOME/programs.json`), preserving other entries:
+
+```json
+{
+  "programs": {
+    "evot": {
+      "name": "evot",
+      "run": ["evot-herdr"],
+      "match": ["evot-herdr"]
+    }
+  }
+}
+```
+
+Keep `evot-herdr`, `evot`, and Node.js on the shell's `PATH`. Restart existing evot processes after upgrading the adapter.
+
+**Why a bridge?** evot launches its hook detached with stdout/stderr discarded. Printing an OSC escape from the hook would not reach the App. The wrapper instead creates a private local socket (a named pipe on Windows), accepts bounded structured reports, and writes OSC to its own terminal. Sequence generations fence late updates from older hooks. The wrapper clears status on child exit even if evot did not wait for its hook. No OSC bytes are written into redirected stdout/stderr files.
+
+On POSIX, plain `evot` with `EVOT_SESSION_HOOK` also works: the hook resolves the parent evot process's terminal with `ps` and writes to that character device. This is best effort; a missing parent terminal, unavailable `ps`, nested terminal multiplexers, or overlapping hooks can prevent reliable reporting. Prefer the wrapper for fencing and reliable cleanup. On Windows, use the wrapper; detached plain hooks do not have the POSIX terminal fallback.
+
+**Restore boundary:** the App/core's OSC protocol exposes status, not the legacy `report-agent-session` resume-argv API. This adapter does not register automatic conversation restore with herdr-app. Resume saved conversations manually with `evot-herdr --resume <session_id>`; the automatic restore section below applies only to legacy Herdr CLI.
 
 ### Hook mode with a plain `evot`
 
@@ -94,13 +135,15 @@ HERDR_BIN_PATH=/path/to/herdr \
 "$PWD/bin/evot-herdr" < events.ndjson
 ```
 
-Running outside a Herdr pane is harmless: pane discovery fails and the hook stays inert (it still reserves a sequence generation in the state file described below).
+Running outside a Herdr pane or `hc` terminal is harmless: pane discovery fails and the hook stays inert (it still reserves a sequence generation in the state file described below).
 
 ## Environment variables
 
 | Variable | Required | Default | Description |
 | --- | --- | --- | --- |
-| `HERDR_PANE_ID` | No | Current Herdr pane | Explicit pane identifier. |
+| `HERDR_PANE_ID` | No | Current legacy Herdr pane | Explicit legacy pane identifier; takes precedence over App detection. |
+| `HC_TERMINAL_ID` | Supplied by `hc` | Unset | Selects herdr-app/core reporting when no explicit legacy pane is set. Do not set manually. |
+| `EVOT_HERDR_APP_SOCKET` / `EVOT_HERDR_APP_TERMINAL_ID` | Internal | Wrapper-managed | Private App bridge and owning core terminal. Inherited bridges are not reused across different core terminals. |
 | `HERDR_BIN_PATH` | No | `herdr` | Herdr executable path or command name. |
 | `HERDR_COMMAND_TIMEOUT_MS` | No | `2000` | Positive integer timeout for pane discovery, capability detection, and each Herdr update. Timed-out process trees are terminated. |
 | `EVOT_HERDR_SEQUENCE_STATE_PATH` | No | User state directory | Persistent fencing-sequence file. Override mainly for tests or portable installations. |
@@ -109,7 +152,7 @@ Running outside a Herdr pane is harmless: pane discovery fails and the hook stay
 | `EVOT_HERDR_RESUME_COMMAND` | No | `evot-herdr` | Plain command name on `PATH` used for restore. Set to `evot` only if your shell already configures `EVOT_SESSION_HOOK`. Absolute executable paths cannot be used for Herdr restore. |
 | `EVOT_HERDR_ENV_FILE` | No | Unset | Config file to add as `--env-file` to the restore command. Wrapper mode captures `--env-file` automatically as an absolute path. Set explicitly when launching plain `evot` with a non-default config. |
 
-## Automatic conversation restore
+## Automatic conversation restore (legacy Herdr CLI)
 
 Start evot through `evot-herdr` inside a Herdr pane, and send at least one prompt so a persisted session exists. On Herdr 0.9.2+, the adapter reports both the full session ID and a portable restore argv:
 
@@ -176,7 +219,9 @@ Supported events are `session_started`, `state_changed`, `run_started`, `run_fin
 | `session_ended` | Release and clear state, except `reason: session_changed` (the replacement session keeps ownership). |
 | EOF / `SIGINT` / `SIGTERM` | Best-effort release when the hook has handled lifecycle activity. |
 
-Every command includes source `custom:evot`, agent `evot`, and a monotonic `--seq` value. Each hook reserves a persistent sequence block when it starts, fencing late updates from older overlapping hooks. This prevents an old hook's delayed `release-agent` from clearing a newer session. The generation is stored under `$XDG_STATE_HOME/evot-herdr/sequence` (normally `~/.local/state/evot-herdr/sequence`) on POSIX systems and under `%LOCALAPPDATA%\evot-herdr\sequence` on Windows. If this state cannot be safely persisted, Herdr reporting is disabled for that hook rather than risking stale updates or affecting evot.
+The table above describes legacy CLI commands. In herdr-app/core mode, lifecycle events produce OSC 7501 reports with `app=evot` and the same `working` / `blocked` / `idle` mapping; `session_ended` (except `session_changed`), EOF, and handled signals produce `state=clear`. Messages are UTF-8/base64 encoded and bounded. Session IDs and resume argv are not part of OSC status reports.
+
+Every legacy CLI command includes source `custom:evot`, agent `evot`, and a monotonic `--seq` value. Each hook reserves a persistent sequence block when it starts, fencing late updates from older overlapping hooks. This prevents an old hook's delayed `release-agent` from clearing a newer session. The generation is stored under `$XDG_STATE_HOME/evot-herdr/sequence` (normally `~/.local/state/evot-herdr/sequence`) on POSIX systems and under `%LOCALAPPDATA%\evot-herdr\sequence` on Windows. If this state cannot be safely persisted, Herdr reporting is disabled for that hook rather than risking stale updates or affecting evot.
 
 Repeated state reports are suppressed only after the preceding Herdr command succeeds. Failed state and session commands remain eligible for retry on the next event; failed explicit releases are retried during shutdown.
 
@@ -191,7 +236,9 @@ pnpm test
 pnpm pack
 ```
 
-The scripts also work with `npm run typecheck`, `npm test`, and `npm pack`. Vitest runs tests on Node.js; TypeScript compiles only at build/pack time. The published tarball contains `bin/` and compiled `dist/`, with no dependency on development tools.
+The scripts also work with `npm run typecheck`, `npm test`, and `npm pack`. Vitest runs tests on Node.js; TypeScript compiles during `prepare` (including source-checkout installs) and build/pack steps. The installable tarball contains `bin/` and compiled `dist/`, with no runtime dependency on development tools.
+
+Run `npm run test:source` to verify the documented clone/install/link workflow from a clean local Git snapshot without prebuilt `dist/` or `node_modules/`. This test needs Git and access to the npm registry for build-time dependencies; it does not publish anything or change your global installation.
 
 Tests use injected runners and temporary executables; a live Herdr installation is not required. The suite covers lifecycle mapping, failure retries, EOF and signal cleanup, process-tree timeouts, protocol validation, wrapper exit status, wrapper/hook mode selection, and non-TTY wrapper execution.
 
@@ -199,6 +246,8 @@ Main files:
 
 - [`src/index.ts`](src/index.ts): adapter, protocol validation, restore registration, and wrapper logic.
 - [`src/process.ts`](src/process.ts): Node.js process execution, bounded CLI queries, signal exit status, and process-tree cleanup.
+- [`src/app.ts`](src/app.ts): OSC 7501 mapping, private terminal bridge, stale-hook fencing, and POSIX plain-hook terminal fallback.
+- [`tests/app.test.ts`](tests/app.test.ts): App lifecycle, bridge failures, detached hooks, and real POSIX PTY coverage (requires `python3`; skipped when unavailable).
 - [`bin/evot-herdr`](bin/evot-herdr): single entry point; selects wrapper or hook mode.
 - [`tests/adapter.test.ts`](tests/adapter.test.ts): unit and process-level regression tests.
 - [`tests/resume.test.ts`](tests/resume.test.ts): restore argv, capability detection, shutdown boundary, config preservation, and old-version compatibility.

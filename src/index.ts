@@ -11,12 +11,17 @@ import {
   statSync,
   unlinkSync,
   writeFileSync,
+  writeSync,
 } from 'node:fs'
 import { homedir } from 'node:os'
 import { delimiter, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { setTimeout as delay } from 'node:timers/promises'
 import { queryCommand, spawnCommand, terminateProcessTree } from './process.js'
+import {
+  bridgeReporter, EvotHerdrAppAdapter, parentTerminalReporter, startAppBridge,
+  type SessionAdapter,
+} from './app.js'
 
 export type SessionHookState = 'working' | 'blocked' | 'idle'
 
@@ -513,9 +518,29 @@ export class EvotHerdrAdapter {
   }
 }
 
+/** An explicit legacy pane wins for a CLI Herdr nested inside an hc terminal. */
+export function isAppTerminal(env: NodeJS.ProcessEnv): boolean {
+  return !!clean(env.HC_TERMINAL_ID) && !clean(env.HERDR_PANE_ID)
+}
+
+export function createSessionAdapter(env: NodeJS.ProcessEnv = process.env): SessionAdapter {
+  if (!isAppTerminal(env)) return new EvotHerdrAdapter({ env, discoverPane: true })
+  try {
+    const sequence = reserveSequenceBlock({ ...process.env, ...env })
+    const timeout = positiveInteger(env.HERDR_COMMAND_TIMEOUT_MS, DEFAULT_HERDR_TIMEOUT_MS)
+    const socket = clean(env.EVOT_HERDR_APP_SOCKET)
+    const report = socket && env.EVOT_HERDR_APP_TERMINAL_ID === env.HC_TERMINAL_ID
+      ? bridgeReporter(socket, timeout)
+      : parentTerminalReporter(env, timeout)
+    return new EvotHerdrAppAdapter(report, sequence)
+  } catch {
+    return { async handle() {}, async close() {} }
+  }
+}
+
 export async function runAdapter(
   input: AsyncIterable<string>,
-  adapter = new EvotHerdrAdapter(),
+  adapter: SessionAdapter = createSessionAdapter(),
 ): Promise<void> {
   try {
     for await (const line of input) {
@@ -664,7 +689,7 @@ export function envFileFromArgs(args: string[]): string | undefined {
 export async function runEvot(args: string[] = []): Promise<number> {
   const env = { ...process.env }
   if (!clean(env.EVOT_SESSION_HOOK)) env.EVOT_SESSION_HOOK = EXECUTABLE_PATH
-  if (!clean(env.HERDR_PANE_ID)) {
+  if (!clean(env.HERDR_PANE_ID) && !isAppTerminal(env)) {
     const paneId = currentPaneId(env)
     if (paneId) env.HERDR_PANE_ID = paneId
   }
@@ -673,6 +698,20 @@ export async function runEvot(args: string[] = []): Promise<number> {
   const envFile = envFileFromArgs(args)
   if (envFile) env.EVOT_HERDR_ENV_FILE = envFile
   const evotBin = clean(env.EVOT_BIN_PATH) ?? 'evot'
+  let bridge: Awaited<ReturnType<typeof startAppBridge>> | undefined
+  if (isAppTerminal(env)) {
+    // Never reuse an outer wrapper's socket (for example in a nested hc run).
+    delete env.EVOT_HERDR_APP_SOCKET
+    delete env.EVOT_HERDR_APP_TERMINAL_ID
+    const output = process.stdout.isTTY ? process.stdout : process.stderr.isTTY ? process.stderr : undefined
+    if (output) {
+      try {
+        bridge = await startAppBridge(text => { writeSync(output.fd, text) })
+        env.EVOT_HERDR_APP_SOCKET = bridge.path
+        env.EVOT_HERDR_APP_TERMINAL_ID = env.HC_TERMINAL_ID
+      } catch { /* A failed bridge must not stop evot. */ }
+    }
+  }
   try {
     const { child, exited } = spawnCommand([evotBin, ...args], { env, stdio: 'inherit' })
     const onInterrupt = () => { child.kill('SIGINT') }
@@ -692,6 +731,8 @@ export async function runEvot(args: string[] = []): Promise<number> {
     const detail = error instanceof Error ? error.message : String(error)
     console.error(`evot-herdr: failed to start ${evotBin}: ${detail}`)
     return 127
+  } finally {
+    try { await bridge?.close() } catch { /* Best-effort terminal cleanup. */ }
   }
 }
 

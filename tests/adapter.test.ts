@@ -330,6 +330,7 @@ printf '%s\\n' '{"version":1,"event":"session_started","session_id":"sid-discove
       delete process.env.EVOT_SESSION_HOOK
       process.env.HERDR_BIN_PATH = herdr
       delete process.env.HERDR_PANE_ID
+      delete process.env.HC_TERMINAL_ID // Exercise legacy discovery even when tests run inside hc.
       process.env.CAPTURE = calls
       process.env.HOOK_CAPTURE = join(directory, 'hook')
 

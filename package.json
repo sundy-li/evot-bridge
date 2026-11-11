@@ -1,7 +1,7 @@
 {
   "name": "@evotai/evot-herdr",
-  "version": "0.2.0",
-  "description": "Node.js session-hook adapter with automatic evot conversation restore for Herdr",
+  "version": "0.3.0",
+  "description": "Node.js session-hook adapter for evot with Herdr CLI and herdr-app support",
   "type": "module",
   "engines": { "node": ">=22.12.0" },
   "bin": { "evot-herdr": "./bin/evot-herdr" },
@@ -14,6 +14,8 @@
     "test": "npm run build && vitest run",
     "typecheck": "tsc --noEmit",
     "test:package": "node scripts/smoke-package.mjs",
+    "test:source": "node scripts/smoke-source.mjs",
+    "prepare": "npm run build",
     "prepack": "npm run build",
     "prepublishOnly": "npm run typecheck && npm test"
   },

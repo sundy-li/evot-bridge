@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.0 (unreleased)
+
+- Support herdr-app / herdr-core (`hc`) terminals through automatic `HC_TERMINAL_ID` detection and OSC 7501 status reports, while retaining legacy CLI integration.
+- Relay detached session hooks through a private wrapper-owned terminal bridge; fence stale hooks, bound reports, encode messages safely, and clear status when evot exits.
+- Support directly configured POSIX hooks by resolving the parent evot terminal; recommend the wrapper for reliable cleanup and Windows support.
+- Document App launcher configuration and the status-only boundary: legacy automatic conversation restore is not available through the App/core OSC protocol.
+- Add App lifecycle, IPC failure, detached-hook, and real POSIX PTY regression tests.
+- Recommend GitHub source installation instead of an unpublished npm registry package; build automatically through `prepare` and test clean Git installs without prebuilt output.
+
 ## 0.2.0
 
 - Replace the Bun runtime and test runner with Node.js 22.12+, TypeScript build output, and Vitest. The installable package has no runtime dependencies.
